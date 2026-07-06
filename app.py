@@ -40,6 +40,10 @@ def create_app(config_object=Config):
     register_csrf(app)
     register_commands(app)
     register_routes(app)
+
+    with app.app_context():
+        initialize_database()
+
     return app
 
 
@@ -77,18 +81,25 @@ def register_csrf(app):
 def register_commands(app):
     @app.cli.command("init-db")
     def init_db_command():
-        db.create_all()
-        ensure_database_schema()
-        username = os.environ.get("ADMIN_USERNAME")
-        password = os.environ.get("ADMIN_PASSWORD")
-        if username and password and not User.query.filter_by(username=username).first():
-            user = User(username=username)
-            user.set_password(password)
-            db.session.add(user)
-            db.session.commit()
-            print(f"Created admin user: {username}")
+        created_user = initialize_database()
+        if created_user:
+            print(f"Created admin user: {created_user}")
         else:
             print("Database initialized. Set ADMIN_USERNAME and ADMIN_PASSWORD to create a first user.")
+
+
+def initialize_database():
+    db.create_all()
+    ensure_database_schema()
+    username = os.environ.get("ADMIN_USERNAME")
+    password = os.environ.get("ADMIN_PASSWORD")
+    if username and password and not User.query.filter_by(username=username).first():
+        user = User(username=username)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+        return username
+    return None
 
 
 def ensure_database_schema():

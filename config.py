@@ -5,12 +5,21 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 
 
+def database_uri():
+    uri = os.environ.get("DATABASE_URL")
+    if not uri:
+        return f"sqlite:///{BASE_DIR / 'app.db'}"
+
+    if uri.startswith("postgresql://"):
+        return uri.replace("postgresql://", "postgresql+psycopg://", 1)
+    if uri.startswith("postgres://"):
+        return uri.replace("postgres://", "postgresql+psycopg://", 1)
+    return uri
+
+
 class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-change-me-before-hosting")
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "DATABASE_URL",
-        f"sqlite:///{BASE_DIR / 'app.db'}",
-    )
+    SQLALCHEMY_DATABASE_URI = database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     CARDTRADER_API_TOKEN = os.environ.get("CARDTRADER_API_TOKEN", "").strip()
     CARDTRADER_BASE_URL = os.environ.get(
