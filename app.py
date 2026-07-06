@@ -16,7 +16,7 @@ from flask import (
 from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy import inspect, text
 
-from catalog import CONDITIONS, DEFAULT_LANGUAGES, GAMES, LANGUAGES, find_blueprint, search_blueprints
+from catalog import CONDITIONS, DEFAULT_LANGUAGES, LANGUAGES, MAGIC_GAME_ID, MAGIC_GAME_NAME, find_blueprint, search_blueprints
 from config import Config
 from extensions import db, login_manager
 from models import User, Watchlist, WatchlistItem
@@ -130,9 +130,8 @@ def slugify(text):
 
 
 def get_game_name(game_id):
-    for game in GAMES:
-        if game["id"] == game_id:
-            return game["display_name"]
+    if game_id == MAGIC_GAME_ID:
+        return MAGIC_GAME_NAME
     return f"Game {game_id}"
 
 
@@ -250,17 +249,13 @@ def register_routes(app):
     def index():
         query = request.args.get("q", "").strip()
         partial = request.args.get("partial") == "1"
-        game_raw = request.args.get("game_id", "")
-        game_id = int(game_raw) if game_raw else None
-        matches = search_blueprints(query, partial=partial, game_id=game_id) if query else []
+        matches = search_blueprints(query, partial=partial) if query else []
         watchlist = get_or_create_active_watchlist()
         watchlist_blueprint_ids = {item.blueprint_id for item in watchlist.items}
         return render_template(
             "search.html",
             query=query,
             partial=partial,
-            game_id=game_id,
-            games=GAMES,
             matches=matches,
             watchlist=watchlist,
             watchlists=user_watchlists(),

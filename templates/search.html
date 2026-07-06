@@ -3,7 +3,7 @@
 {% block content %}
 <section class="hero">
   <h1>Search cards</h1>
-  <p>Find a CardTrader blueprint, then add it to the watchlist.</p>
+  <p>Find a Magic: the Gathering CardTrader blueprint, then add it to the watchlist.</p>
 </section>
 
 {% include "_watchlist_selector.html" %}
@@ -13,14 +13,6 @@
     <label>
       Card name
       <input name="q" value="{{ query }}" placeholder="Example: Sol Ring" required>
-    </label>
-    <label>
-      Game
-      <select name="game_id">
-        {% for game in games %}
-          <option value="{{ game.id or '' }}" {% if game.id == game_id %}selected{% endif %}>{{ game.display_name }}</option>
-        {% endfor %}
-      </select>
     </label>
     <label class="checkbox-row">
       <input type="checkbox" name="partial" value="1" {% if partial %}checked{% endif %}>
@@ -50,7 +42,6 @@
             </div>
             <div class="meta">
               <div class="card-title">{{ card.name }}</div>
-              <div><strong>Game:</strong> {{ game_name(card.game_id) }}</div>
               <div><strong>Expansion:</strong> {{ card.expansion_name }}</div>
               <div><strong>Collector number:</strong> {{ card.collector_number }}</div>
               <div><strong>Rarity:</strong> {{ card.rarity }}</div>

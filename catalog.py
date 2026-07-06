@@ -3,23 +3,8 @@ import sqlite3
 from flask import current_app
 
 
-GAMES = [
-    {"id": None, "display_name": "All games"},
-    {"id": 1, "display_name": "Magic: the Gathering"},
-    {"id": 4, "display_name": "Yu-Gi-Oh!"},
-    {"id": 5, "display_name": "Pokemon"},
-    {"id": 6, "display_name": "Flesh and Blood"},
-    {"id": 8, "display_name": "Digimon"},
-    {"id": 9, "display_name": "Dragon Ball Super"},
-    {"id": 10, "display_name": "Cardfight!! Vanguard"},
-    {"id": 15, "display_name": "One Piece"},
-    {"id": 18, "display_name": "Disney Lorcana"},
-    {"id": 20, "display_name": "Star Wars Unlimited"},
-    {"id": 21, "display_name": "Union Arena"},
-    {"id": 22, "display_name": "Riftbound | League of Legends"},
-    {"id": 23, "display_name": "Gundam"},
-    {"id": 24, "display_name": "Sorcery: Contested Realm"},
-]
+MAGIC_GAME_ID = 1
+MAGIC_GAME_NAME = "Magic: the Gathering"
 
 LANGUAGES = [
     ("it", "IT"),
@@ -76,6 +61,7 @@ def row_to_blueprint(row):
         "game_id": row["game_id"],
         "expansion_name": row["expansion_name"],
         "collector_number": row["collector_number"],
+        "rarity": row["rarity"],
         "image_url": row["image_url"],
     }
 
@@ -84,7 +70,7 @@ def find_blueprint(blueprint_id):
     with open_catalog() as connection:
         row = connection.execute(
             """
-            SELECT blueprint_id, name, version, game_id, expansion_name, collector_number, image_url
+            SELECT blueprint_id, name, version, game_id, expansion_name, collector_number, rarity, image_url
             FROM blueprints
             WHERE blueprint_id = ?
             """,
@@ -93,15 +79,12 @@ def find_blueprint(blueprint_id):
     return row_to_blueprint(row)
 
 
-def search_blueprints(search_name, partial=False, game_id=None, limit=100):
+def search_blueprints(search_name, partial=False, limit=100):
     if not search_name:
         return []
 
-    where_clauses = []
-    parameters = []
-    if game_id is not None:
-        where_clauses.append("game_id = ?")
-        parameters.append(game_id)
+    where_clauses = ["game_id = ?"]
+    parameters = [MAGIC_GAME_ID]
 
     if partial:
         where_clauses.append("lower(name) LIKE ?")
@@ -112,7 +95,7 @@ def search_blueprints(search_name, partial=False, game_id=None, limit=100):
 
     parameters.append(limit)
     query = f"""
-        SELECT blueprint_id, name, version, game_id, expansion_name, collector_number, image_url
+        SELECT blueprint_id, name, version, game_id, expansion_name, collector_number, rarity, image_url
         FROM blueprints
         WHERE {" AND ".join(where_clauses)}
         ORDER BY game_id, expansion_name, collector_number

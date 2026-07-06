@@ -95,7 +95,7 @@ Set environment variables in the hosting dashboard:
 
 For production, prefer PostgreSQL through the hosting provider. SQLite is fine for local and LAN testing.
 
-The bundled blueprint catalog is stored as `data/blueprints_db.json.gz` so it can fit in a normal private GitHub repository. The app reads it directly; you do not need to unzip it.
+The bundled blueprint catalog is stored as `data/blueprints.sqlite`. For this MVP it contains only Magic: the Gathering cards, which keeps searches fast and memory usage low on small hosting plans.
 
 ## Tests
 
