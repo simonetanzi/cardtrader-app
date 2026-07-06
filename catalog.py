@@ -1,6 +1,4 @@
-import json
-import gzip
-from functools import lru_cache
+import sqlite3
 
 from flask import current_app
 
@@ -61,48 +59,66 @@ DEFAULT_LANGUAGES = ["en"]
 DEFAULT_MINIMUM_CONDITION = "Moderately Played"
 
 
-@lru_cache(maxsize=1)
-def load_blueprints():
+def open_catalog():
     path = current_app.config["BLUEPRINTS_DB_PATH"]
-    opener = gzip.open if path.suffix == ".gz" else open
-    with opener(path, "rt", encoding="utf-8") as file:
-        data = json.load(file)
-    return data.get("blueprints", [])
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def row_to_blueprint(row):
+    if row is None:
+        return None
+    return {
+        "blueprint_id": row["blueprint_id"],
+        "name": row["name"],
+        "version": row["version"],
+        "game_id": row["game_id"],
+        "expansion_name": row["expansion_name"],
+        "collector_number": row["collector_number"],
+        "image_url": row["image_url"],
+    }
 
 
 def find_blueprint(blueprint_id):
-    wanted = int(blueprint_id)
-    for blueprint in load_blueprints():
-        if blueprint.get("blueprint_id") == wanted:
-            return blueprint
-    return None
-
-
-def matches_card_name(blueprint, search_name, partial):
-    name = blueprint.get("name", "")
-    if partial:
-        return search_name.lower() in name.lower()
-    return name.lower() == search_name.lower()
+    with open_catalog() as connection:
+        row = connection.execute(
+            """
+            SELECT blueprint_id, name, version, game_id, expansion_name, collector_number, image_url
+            FROM blueprints
+            WHERE blueprint_id = ?
+            """,
+            (int(blueprint_id),),
+        ).fetchone()
+    return row_to_blueprint(row)
 
 
 def search_blueprints(search_name, partial=False, game_id=None, limit=100):
     if not search_name:
         return []
 
-    matches = []
-    for blueprint in load_blueprints():
-        if game_id is not None and blueprint.get("game_id") != game_id:
-            continue
-        if matches_card_name(blueprint, search_name, partial):
-            matches.append(blueprint)
-            if len(matches) >= limit:
-                break
+    where_clauses = []
+    parameters = []
+    if game_id is not None:
+        where_clauses.append("game_id = ?")
+        parameters.append(game_id)
 
-    matches.sort(
-        key=lambda bp: (
-            str(bp.get("game_id") or ""),
-            str(bp.get("expansion_name") or ""),
-            str(bp.get("collector_number") or ""),
-        )
-    )
-    return matches
+    if partial:
+        where_clauses.append("lower(name) LIKE ?")
+        parameters.append(f"%{search_name.lower()}%")
+    else:
+        where_clauses.append("lower(name) = ?")
+        parameters.append(search_name.lower())
+
+    parameters.append(limit)
+    query = f"""
+        SELECT blueprint_id, name, version, game_id, expansion_name, collector_number, image_url
+        FROM blueprints
+        WHERE {" AND ".join(where_clauses)}
+        ORDER BY game_id, expansion_name, collector_number
+        LIMIT ?
+    """
+
+    with open_catalog() as connection:
+        rows = connection.execute(query, parameters).fetchall()
+    return [row_to_blueprint(row) for row in rows]

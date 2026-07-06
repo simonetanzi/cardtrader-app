@@ -27,7 +27,7 @@ class Config:
         "https://api.cardtrader.com/api/v2",
     ).rstrip("/")
     BLUEPRINTS_DB_PATH = Path(
-        os.environ.get("BLUEPRINTS_DB_PATH", BASE_DIR / "data" / "blueprints_db.json.gz")
+        os.environ.get("BLUEPRINTS_DB_PATH", BASE_DIR / "data" / "blueprints.sqlite")
     )
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
