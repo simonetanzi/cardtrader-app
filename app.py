@@ -128,13 +128,20 @@ def ensure_database_schema():
         return
 
     existing_columns = {column["name"] for column in inspector.get_columns("user")}
+    user_table = db.engine.dialect.identifier_preparer.quote("user")
+    boolean_default = "FALSE" if db.engine.dialect.name == "postgresql" else "0"
     with db.engine.begin() as connection:
         if "is_admin" not in existing_columns:
-            connection.execute(text("ALTER TABLE user ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"))
+            connection.execute(
+                text(
+                    f"ALTER TABLE {user_table} "
+                    f"ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT {boolean_default}"
+                )
+            )
         if "cardtrader_api_token" not in existing_columns:
-            connection.execute(text("ALTER TABLE user ADD COLUMN cardtrader_api_token TEXT"))
+            connection.execute(text(f"ALTER TABLE {user_table} ADD COLUMN cardtrader_api_token TEXT"))
         if "active_watchlist_id" not in existing_columns:
-            connection.execute(text("ALTER TABLE user ADD COLUMN active_watchlist_id INTEGER"))
+            connection.execute(text(f"ALTER TABLE {user_table} ADD COLUMN active_watchlist_id INTEGER"))
 
 
 def parse_price_to_cents(raw_value):
