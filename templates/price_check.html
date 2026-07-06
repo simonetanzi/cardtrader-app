@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Price Check - CardTrader App{% endblock %}
+{% block page_class %}page-wide{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Price check</h1>
+  <p>Checks marketplace candidates, then verifies availability by adding to the CardTrader cart and removing the added quantity.</p>
+</section>
+
+{% include "_watchlist_selector.html" %}
+
+<section class="panel">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" {% if not api_configured or not watchlist.items %}disabled{% endif %}>Run live price check</button>
+  </form>
+  {% if not watchlist.items %}
+    <p class="muted">Add cards to the watchlist before running a price check.</p>
+  {% endif %}
+</section>
+
+{% if report %}
+  <section class="panel">
+    <div class="section-heading">
+      <h2>Report</h2>
+      <span class="muted">Generated {{ report.generated_at }}</span>
+    </div>
+    {% if report.api_error %}
+      <div class="message warning">{{ report.api_error }}</div>
+    {% endif %}
+    <p><strong>{{ report.total_cards }}</strong> verified cards across <strong>{{ report.total_offers }}</strong> verified offers.</p>
+
+    <div class="report-list">
+      {% for result in report.results %}
+        <article class="report-card">
+          <div class="report-header">
+            <div class="report-art">
+              {% if result.item.image_url %}
+                <img class="report-image" src="{{ result.item.image_url }}" alt="{{ result.item.name }}">
+              {% endif %}
+            </div>
+            <div class="report-info">
+              <div class="report-title">{{ result.item.name }}</div>
+              <div class="watchlist-set">{{ result.item.expansion_name }}</div>
+              <div><strong>Target:</strong> {% if result.item.max_price_cents is none %}Not priced{% else %}up to {{ money_from_cents(result.item.max_price_cents) }}{% endif %}</div>
+              <div><strong>Languages:</strong> {% for code in result.item.allowed_language_list() %}{{ language_label(code) }}{% if not loop.last %}, {% endif %}{% endfor %}</div>
+              <div><strong>Minimum condition:</strong> {{ result.item.minimum_condition }}</div>
+              <a class="card-link" href="{{ cardtrader_card_url(result.item) }}" target="_blank" rel="noopener noreferrer">Open CardTrader card page</a>
+            </div>
+          </div>
+
+          {% if result.skipped %}
+            <p class="muted">Skipped: {{ result.message }}</p>
+          {% elif result.offers %}
+            <div class="result-status match">
+              <strong>{{ result.cards_count }}</strong> card(s) found.
+              Lowest price: <strong>{{ money_from_cents(result.lowest_offer.price_cents) }}</strong>
+            </div>
+          {% else %}
+            <div class="result-status no-match">No qualifying CT0 offers found.</div>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+{% endif %}
+{% endblock %}

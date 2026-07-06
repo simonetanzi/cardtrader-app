@@ -1,0 +1,22 @@
+<section class="panel watchlist-selector-box">
+  <form method="post" action="{{ url_for('switch_watchlist') }}" class="watchlist-selector-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>
+      Active watchlist
+      <select name="watchlist_id">
+        {% for candidate in watchlists %}
+          <option value="{{ candidate.id }}" {% if candidate.id == watchlist.id %}selected{% endif %}>
+            {{ candidate.name }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Switch</button>
+  </form>
+
+  <form method="post" action="{{ url_for('create_watchlist') }}" class="new-watchlist-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input name="name" placeholder="New watchlist name">
+    <button type="submit">New watchlist</button>
+  </form>
+</section>

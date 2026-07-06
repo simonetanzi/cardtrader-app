@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Config - CardTrader App{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Config</h1>
+  <p>Save the CardTrader API token used by your user account for live availability checks.</p>
+</section>
+
+<section class="panel narrowish">
+  <form method="post" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>
+      CardTrader API token
+      <input
+        type="password"
+        name="cardtrader_api_token"
+        value="{{ current_user.cardtrader_api_token or '' }}"
+        autocomplete="off"
+        placeholder="Paste API token"
+      >
+    </label>
+    <button type="submit">Save token</button>
+  </form>
+
+  {% if current_user.has_cardtrader_api_token %}
+    <p class="muted">A token is saved for this user.</p>
+  {% else %}
+    <p class="muted">No token is saved for this user yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

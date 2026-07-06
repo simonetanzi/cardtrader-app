@@ -1,0 +1,484 @@
+import os
+import re
+import secrets
+from urllib.parse import urlparse
+
+from flask import (
+    Flask,
+    abort,
+    flash,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
+from flask_login import current_user, login_required, login_user, logout_user
+from sqlalchemy import inspect, text
+
+from catalog import CONDITIONS, DEFAULT_LANGUAGES, GAMES, LANGUAGES, find_blueprint, search_blueprints
+from config import Config
+from extensions import db, login_manager
+from models import User, Watchlist, WatchlistItem
+from price_check import (
+    money_from_cents,
+    product_condition,
+    product_language,
+    run_price_check,
+    seller_name,
+)
+
+
+def create_app(config_object=Config):
+    app = Flask(__name__)
+    app.config.from_object(config_object)
+
+    db.init_app(app)
+    login_manager.init_app(app)
+
+    register_template_helpers(app)
+    register_csrf(app)
+    register_commands(app)
+    register_routes(app)
+    return app
+
+
+def register_template_helpers(app):
+    @app.context_processor
+    def inject_helpers():
+        token = session.setdefault("csrf_token", secrets.token_urlsafe(32))
+        return {
+            "csrf_token": token,
+            "cardtrader_card_url": build_cardtrader_card_url,
+            "game_name": get_game_name,
+            "language_label": get_language_label,
+            "money_from_cents": money_from_cents,
+            "seller_name": seller_name,
+            "product_condition": product_condition,
+            "product_language": product_language,
+            "api_configured": (
+                current_user.is_authenticated
+                and current_user.has_cardtrader_api_token
+            ),
+        }
+
+
+def register_csrf(app):
+    @app.before_request
+    def protect_post_requests():
+        if request.method != "POST":
+            return
+        expected = session.get("csrf_token")
+        received = request.form.get("csrf_token")
+        if not expected or not received or not secrets.compare_digest(expected, received):
+            abort(400, "Invalid form token.")
+
+
+def register_commands(app):
+    @app.cli.command("init-db")
+    def init_db_command():
+        db.create_all()
+        ensure_database_schema()
+        username = os.environ.get("ADMIN_USERNAME")
+        password = os.environ.get("ADMIN_PASSWORD")
+        if username and password and not User.query.filter_by(username=username).first():
+            user = User(username=username)
+            user.set_password(password)
+            db.session.add(user)
+            db.session.commit()
+            print(f"Created admin user: {username}")
+        else:
+            print("Database initialized. Set ADMIN_USERNAME and ADMIN_PASSWORD to create a first user.")
+
+
+def ensure_database_schema():
+    inspector = inspect(db.engine)
+    if not inspector.has_table("user"):
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("user")}
+    with db.engine.begin() as connection:
+        if "cardtrader_api_token" not in existing_columns:
+            connection.execute(text("ALTER TABLE user ADD COLUMN cardtrader_api_token TEXT"))
+        if "active_watchlist_id" not in existing_columns:
+            connection.execute(text("ALTER TABLE user ADD COLUMN active_watchlist_id INTEGER"))
+
+
+def parse_price_to_cents(raw_value):
+    value = (raw_value or "").strip().replace(",", ".")
+    if not value:
+        return None
+    return int(round(float(value) * 100))
+
+
+def slugify(text):
+    text = (text or "").lower()
+    text = text.replace("&", "and")
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")
+
+
+def get_game_name(game_id):
+    for game in GAMES:
+        if game["id"] == game_id:
+            return game["display_name"]
+    return f"Game {game_id}"
+
+
+def get_language_label(language_code):
+    for code, label in LANGUAGES:
+        if code == language_code:
+            return label
+    return language_code
+
+
+def build_cardtrader_card_url(card):
+    if isinstance(card, dict):
+        image_url = card.get("image_url")
+        name = card.get("name", "")
+        expansion_name = card.get("expansion_name", "")
+    else:
+        image_url = getattr(card, "image_url", None)
+        name = getattr(card, "name", "")
+        expansion_name = getattr(card, "expansion_name", "")
+
+    if image_url:
+        filename = str(image_url).rsplit("/", 1)[-1]
+        if filename.startswith("preview_"):
+            filename = filename.replace("preview_", "", 1)
+        for extension in [".jpg", ".jpeg", ".png", ".webp"]:
+            if filename.endswith(extension):
+                filename = filename[: -len(extension)]
+                break
+        if filename:
+            return f"https://www.cardtrader.com/en/cards/{filename}"
+
+    return f"https://www.cardtrader.com/en/cards/{slugify(f'{name} {expansion_name}')}"
+
+
+def user_watchlists():
+    return Watchlist.query.filter_by(user_id=current_user.id).order_by(Watchlist.id).all()
+
+
+def get_or_create_active_watchlist():
+    watchlist = None
+
+    if current_user.active_watchlist_id:
+        watchlist = Watchlist.query.filter_by(
+            id=current_user.active_watchlist_id,
+            user_id=current_user.id,
+        ).first()
+
+    if watchlist is None:
+        watchlist = Watchlist.query.filter_by(user_id=current_user.id).order_by(Watchlist.id).first()
+
+    if watchlist is None:
+        watchlist = Watchlist(name="Watchlist 1", user_id=current_user.id)
+        db.session.add(watchlist)
+        db.session.flush()
+
+    if current_user.active_watchlist_id != watchlist.id:
+        current_user.active_watchlist_id = watchlist.id
+        db.session.commit()
+
+    return watchlist
+
+
+def make_next_watchlist_name():
+    return f"Watchlist {len(user_watchlists()) + 1}"
+
+
+def wants_safe_redirect(target):
+    if not target:
+        return False
+    parsed = urlparse(target)
+    return not parsed.netloc and not parsed.scheme
+
+
+def register_routes(app):
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        if current_user.is_authenticated:
+            return redirect(url_for("index"))
+
+        if request.method == "POST":
+            username = request.form.get("username", "").strip()
+            password = request.form.get("password", "")
+            user = User.query.filter_by(username=username).first()
+            if user and user.check_password(password):
+                login_user(user)
+                target = request.args.get("next")
+                if wants_safe_redirect(target):
+                    return redirect(target)
+                return redirect(url_for("index"))
+            flash("Login failed. Check the username and password.", "error")
+
+        return render_template("login.html")
+
+    @app.route("/logout", methods=["POST"])
+    @login_required
+    def logout():
+        logout_user()
+        flash("Logged out.", "info")
+        return redirect(url_for("login"))
+
+    @app.route("/config", methods=["GET", "POST"])
+    @login_required
+    def config_page():
+        if request.method == "POST":
+            token = request.form.get("cardtrader_api_token", "").strip()
+            current_user.cardtrader_api_token = token
+            db.session.commit()
+            flash("CardTrader API token saved for your user.", "success")
+            return redirect(url_for("config_page"))
+
+        return render_template("config.html")
+
+    @app.route("/")
+    @login_required
+    def index():
+        query = request.args.get("q", "").strip()
+        partial = request.args.get("partial") == "1"
+        game_raw = request.args.get("game_id", "")
+        game_id = int(game_raw) if game_raw else None
+        matches = search_blueprints(query, partial=partial, game_id=game_id) if query else []
+        watchlist = get_or_create_active_watchlist()
+        watchlist_blueprint_ids = {item.blueprint_id for item in watchlist.items}
+        return render_template(
+            "search.html",
+            query=query,
+            partial=partial,
+            game_id=game_id,
+            games=GAMES,
+            matches=matches,
+            watchlist=watchlist,
+            watchlists=user_watchlists(),
+            watchlist_blueprint_ids=watchlist_blueprint_ids,
+        )
+
+    @app.route("/watchlist")
+    @login_required
+    def watchlist():
+        watchlist = get_or_create_active_watchlist()
+        return render_template(
+            "watchlist.html",
+            watchlist=watchlist,
+            watchlists=user_watchlists(),
+            languages=LANGUAGES,
+            conditions=CONDITIONS,
+        )
+
+    @app.route("/watchlist/switch", methods=["POST"])
+    @login_required
+    def switch_watchlist():
+        watchlist_id_raw = request.form.get("watchlist_id", "").strip()
+        try:
+            watchlist_id = int(watchlist_id_raw)
+        except ValueError:
+            abort(400)
+
+        watchlist = Watchlist.query.filter_by(id=watchlist_id, user_id=current_user.id).first()
+        if watchlist is None:
+            abort(404)
+
+        current_user.active_watchlist_id = watchlist.id
+        db.session.commit()
+        return redirect(request.referrer or url_for("watchlist"))
+
+    @app.route("/watchlist/create", methods=["POST"])
+    @login_required
+    def create_watchlist():
+        name = request.form.get("name", "").strip() or make_next_watchlist_name()
+        watchlist = Watchlist(name=name[:120], user_id=current_user.id)
+        db.session.add(watchlist)
+        db.session.flush()
+        current_user.active_watchlist_id = watchlist.id
+        db.session.commit()
+        flash("New watchlist created.", "success")
+        return redirect(url_for("watchlist"))
+
+    @app.route("/watchlist/rename", methods=["POST"])
+    @login_required
+    def rename_watchlist():
+        watchlist = get_or_create_active_watchlist()
+        name = request.form.get("name", "").strip()
+        if not name:
+            flash("Watchlist name cannot be empty.", "error")
+            return redirect(url_for("watchlist"))
+
+        watchlist.name = name[:120]
+        db.session.commit()
+        flash("Watchlist renamed.", "success")
+        return redirect(url_for("watchlist"))
+
+    @app.route("/watchlist/delete-active", methods=["POST"])
+    @login_required
+    def delete_active_watchlist():
+        watchlist = get_or_create_active_watchlist()
+        if len(user_watchlists()) <= 1:
+            flash("You must keep at least one watchlist.", "error")
+            return redirect(url_for("watchlist"))
+
+        db.session.delete(watchlist)
+        db.session.flush()
+        replacement = Watchlist.query.filter_by(user_id=current_user.id).order_by(Watchlist.id).first()
+        current_user.active_watchlist_id = replacement.id if replacement else None
+        db.session.commit()
+        flash("Active watchlist deleted.", "info")
+        return redirect(url_for("watchlist"))
+
+    @app.route("/watchlist/add", methods=["POST"])
+    @login_required
+    def add_to_watchlist():
+        watchlist = get_or_create_active_watchlist()
+        blueprint = find_blueprint(request.form.get("blueprint_id"))
+        if blueprint is None:
+            abort(404)
+
+        existing = WatchlistItem.query.filter_by(
+            watchlist_id=watchlist.id,
+            blueprint_id=blueprint["blueprint_id"],
+        ).first()
+        if existing:
+            flash("That card is already in the watchlist.", "info")
+            return redirect(url_for("watchlist"))
+
+        item = WatchlistItem(
+            watchlist_id=watchlist.id,
+            blueprint_id=blueprint["blueprint_id"],
+            name=blueprint.get("name", ""),
+            version=blueprint.get("version"),
+            game_id=blueprint.get("game_id"),
+            expansion_name=blueprint.get("expansion_name"),
+            collector_number=blueprint.get("collector_number"),
+            image_url=blueprint.get("image_url"),
+            allowed_languages=",".join(DEFAULT_LANGUAGES),
+        )
+        db.session.add(item)
+        db.session.commit()
+        flash("Card added to watchlist.", "success")
+        return redirect(url_for("watchlist"))
+
+    @app.route("/watchlist/toggle", methods=["POST"])
+    @login_required
+    def toggle_watchlist_item():
+        watchlist = get_or_create_active_watchlist()
+        blueprint = find_blueprint(request.form.get("blueprint_id"))
+        if blueprint is None:
+            abort(404)
+
+        existing = WatchlistItem.query.filter_by(
+            watchlist_id=watchlist.id,
+            blueprint_id=blueprint["blueprint_id"],
+        ).first()
+
+        if existing:
+            db.session.delete(existing)
+            db.session.commit()
+            flash("Card removed from watchlist.", "info")
+        else:
+            item = WatchlistItem(
+                watchlist_id=watchlist.id,
+                blueprint_id=blueprint["blueprint_id"],
+                name=blueprint.get("name", ""),
+                version=blueprint.get("version"),
+                game_id=blueprint.get("game_id"),
+                expansion_name=blueprint.get("expansion_name"),
+                collector_number=blueprint.get("collector_number"),
+                image_url=blueprint.get("image_url"),
+                allowed_languages=",".join(DEFAULT_LANGUAGES),
+            )
+            db.session.add(item)
+            db.session.commit()
+            flash("Card added to watchlist.", "success")
+
+        return redirect(request.referrer or url_for("index"))
+
+    @app.route("/watchlist/update-all", methods=["POST"])
+    @login_required
+    def update_all_watchlist_items():
+        watchlist = get_or_create_active_watchlist()
+        valid_language_codes = [code for code, _label in LANGUAGES]
+
+        for item in watchlist.items:
+            try:
+                item.max_price_cents = parse_price_to_cents(
+                    request.form.get(f"max_price_{item.id}")
+                )
+            except ValueError:
+                flash(f"Target price for {item.name} must be a number.", "error")
+                return redirect(url_for("watchlist"))
+
+            condition = request.form.get(f"minimum_condition_{item.id}")
+            if condition in CONDITIONS:
+                item.minimum_condition = condition
+
+            selected_languages = request.form.getlist(f"allowed_languages_{item.id}")
+            selected_languages = [
+                language for language in selected_languages
+                if language in valid_language_codes
+            ]
+            item.allowed_languages = ",".join(selected_languages or DEFAULT_LANGUAGES)
+
+        db.session.commit()
+        flash("Watchlist settings updated.", "success")
+        return redirect(url_for("watchlist"))
+
+    @app.route("/watchlist/item/<int:item_id>/update", methods=["POST"])
+    @login_required
+    def update_watchlist_item(item_id):
+        item = db.session.get(WatchlistItem, item_id)
+        if item is None or item.watchlist.user_id != current_user.id:
+            abort(404)
+
+        selected_languages = [
+            code for code, _label in LANGUAGES if request.form.get(f"lang_{code}") == "on"
+        ]
+        if not selected_languages:
+            selected_languages = DEFAULT_LANGUAGES
+
+        try:
+            item.max_price_cents = parse_price_to_cents(request.form.get("max_price"))
+        except ValueError:
+            flash("Target price must be a number, for example 1.25.", "error")
+            return redirect(url_for("watchlist"))
+
+        condition = request.form.get("minimum_condition")
+        if condition in CONDITIONS:
+            item.minimum_condition = condition
+        item.allowed_languages = ",".join(selected_languages)
+        db.session.commit()
+        flash("Watchlist item updated.", "success")
+        return redirect(url_for("watchlist"))
+
+    @app.route("/watchlist/item/<int:item_id>/delete", methods=["POST"])
+    @login_required
+    def delete_watchlist_item(item_id):
+        item = db.session.get(WatchlistItem, item_id)
+        if item is None or item.watchlist.user_id != current_user.id:
+            abort(404)
+        db.session.delete(item)
+        db.session.commit()
+        flash("Card removed from watchlist.", "info")
+        return redirect(url_for("watchlist"))
+
+    @app.route("/price-check", methods=["GET", "POST"])
+    @login_required
+    def price_check():
+        watchlist = get_or_create_active_watchlist()
+        report = None
+        if request.method == "POST":
+            report = run_price_check(watchlist.items)
+        return render_template(
+            "price_check.html",
+            watchlist=watchlist,
+            watchlists=user_watchlists(),
+            report=report,
+        )
+
+
+app = create_app()
+
+
+if __name__ == "__main__":
+    app.run(host=os.environ.get("FLASK_RUN_HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "5000")))

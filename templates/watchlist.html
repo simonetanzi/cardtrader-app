@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Watchlist - CardTrader App{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>{{ watchlist.name }}</h1>
+  <p>Set target price, accepted languages, and minimum condition for each card.</p>
+</section>
+
+{% include "_watchlist_selector.html" %}
+
+<section class="panel watchlist-manage-box">
+  <form method="post" action="{{ url_for('rename_watchlist') }}" class="rename-watchlist-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>
+      Rename active watchlist
+      <input name="name" value="{{ watchlist.name }}" required>
+    </label>
+    <button type="submit">Rename</button>
+  </form>
+  <form method="post" action="{{ url_for('delete_active_watchlist') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="danger" {% if watchlists|length <= 1 %}disabled{% endif %}>Delete active watchlist</button>
+  </form>
+</section>
+
+{% if watchlist.items %}
+  <form id="bulk-update-form" method="post" action="{{ url_for('update_all_watchlist_items') }}" class="bulk-action-bar">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Update active watchlist settings</button>
+  </form>
+
+  <section class="watchlist-list">
+    {% for item in watchlist.items %}
+      <article class="watchlist-row">
+        <div class="watchlist-main">
+          <div class="watchlist-art">
+            {% if item.image_url %}
+              <img class="watchlist-image" src="{{ item.image_url }}" alt="{{ item.name }}">
+            {% else %}
+              <p class="muted">No image available</p>
+            {% endif %}
+          </div>
+          <div class="watchlist-info">
+            <div class="watchlist-name">{{ item.name }}</div>
+            <div class="watchlist-set">{{ item.expansion_name }}</div>
+            <div class="watchlist-price">
+              <strong>Current target:</strong>
+              {% if item.max_price_cents is none %}Not priced{% else %}{{ money_from_cents(item.max_price_cents) }}{% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-form">
+          <div class="settings-top">
+            <label class="price-control">
+              <span>Desired max price (EUR, equal is accepted)</span>
+              <input
+                form="bulk-update-form"
+                type="number"
+                name="max_price_{{ item.id }}"
+                min="0"
+                step="0.01"
+                value="{% if item.max_price_cents is not none %}{{ '%.2f'|format(item.max_price_cents / 100) }}{% endif %}"
+                placeholder="1.50"
+              >
+            </label>
+            <label class="condition-control">
+              <span>Minimum condition</span>
+              <select form="bulk-update-form" name="minimum_condition_{{ item.id }}">
+                {% for condition in conditions %}
+                  <option value="{{ condition }}" {% if condition == item.minimum_condition %}selected{% endif %}>{{ condition }}</option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+          <div class="language-control">
+            <div class="control-label">Languages</div>
+            {% set selected = item.allowed_language_list() %}
+            <div class="language-wrap">
+              {% for code, label in languages %}
+                <label class="language-pill">
+                  <input
+                    form="bulk-update-form"
+                    type="checkbox"
+                    name="allowed_languages_{{ item.id }}"
+                    value="{{ code }}"
+                    {% if code in selected %}checked{% endif %}
+                  >
+                  <span>{{ label }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+
+        <form method="post" action="{{ url_for('delete_watchlist_item', item_id=item.id) }}" class="remove-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="danger">Remove</button>
+        </form>
+      </article>
+    {% endfor %}
+  </section>
+{% else %}
+  <section class="panel">
+    <p>The watchlist is empty. Search for a card and add it here.</p>
+  </section>
+{% endif %}
+{% endblock %}

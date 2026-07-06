@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}CardTrader App{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('index') }}">CardTrader App</a>
+    {% if current_user.is_authenticated %}
+      <nav>
+        <a href="{{ url_for('index') }}">Search</a>
+        <a href="{{ url_for('watchlist') }}">Watchlist</a>
+        <a href="{{ url_for('price_check') }}">Price Check</a>
+        <a href="{{ url_for('config_page') }}">Config</a>
+      </nav>
+      <form method="post" action="{{ url_for('logout') }}" class="logout-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="link-button">Log out</button>
+      </form>
+    {% endif %}
+  </header>
+
+  <main class="page {% block page_class %}{% endblock %}">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <section class="messages">
+          {% for category, message in messages %}
+            <div class="message {{ category }}">{{ message }}</div>
+          {% endfor %}
+        </section>
+      {% endif %}
+    {% endwith %}
+
+    {% if current_user.is_authenticated and not api_configured %}
+      <div class="message warning">
+        CardTrader API token is not configured for your user. Open Config before running live price checks.
+      </div>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

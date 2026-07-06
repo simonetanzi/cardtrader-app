@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Search - CardTrader App{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Search cards</h1>
+  <p>Find a CardTrader blueprint, then add it to the watchlist.</p>
+</section>
+
+{% include "_watchlist_selector.html" %}
+
+<section class="panel">
+  <form method="get" class="search-form">
+    <label>
+      Card name
+      <input name="q" value="{{ query }}" placeholder="Example: Sol Ring" required>
+    </label>
+    <label>
+      Game
+      <select name="game_id">
+        {% for game in games %}
+          <option value="{{ game.id or '' }}" {% if game.id == game_id %}selected{% endif %}>{{ game.display_name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="checkbox-row">
+      <input type="checkbox" name="partial" value="1" {% if partial %}checked{% endif %}>
+      Partial match
+    </label>
+    <button type="submit">Search</button>
+  </form>
+</section>
+
+{% if query %}
+  <section class="panel">
+    <div class="section-heading">
+      <h2>Results</h2>
+      <span class="muted">{{ matches|length }} shown</span>
+    </div>
+    {% if matches %}
+      <div class="grid">
+        {% for card in matches %}
+          {% set in_watchlist = card.blueprint_id in watchlist_blueprint_ids %}
+          <article class="card">
+            <div class="card-art">
+              {% if card.image_url %}
+                <img src="{{ card.image_url }}" alt="{{ card.name }}">
+              {% else %}
+                <p class="muted">No image available</p>
+              {% endif %}
+            </div>
+            <div class="meta">
+              <div class="card-title">{{ card.name }}</div>
+              <div><strong>Game:</strong> {{ game_name(card.game_id) }}</div>
+              <div><strong>Expansion:</strong> {{ card.expansion_name }}</div>
+              <div><strong>Collector number:</strong> {{ card.collector_number }}</div>
+              <div><strong>Rarity:</strong> {{ card.rarity }}</div>
+            </div>
+            <form method="post" action="{{ url_for('toggle_watchlist_item') }}" class="watchlist-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="blueprint_id" value="{{ card.blueprint_id }}">
+              <button type="submit" class="{% if in_watchlist %}danger{% endif %}">
+                {% if in_watchlist %}Remove from active watchlist{% else %}Add to active watchlist{% endif %}
+              </button>
+            </form>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p>No matching blueprints found.</p>
+    {% endif %}
+  </section>
+{% endif %}
+{% endblock %}
