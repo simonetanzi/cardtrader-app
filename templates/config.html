@@ -9,6 +9,7 @@
 <section class="panel narrowish">
   <form method="post" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="form_action" value="api_token">
     <label>
       CardTrader API token
       <input
@@ -27,5 +28,26 @@
   {% else %}
     <p class="muted">No token is saved for this user yet.</p>
   {% endif %}
+</section>
+
+<section class="panel narrowish">
+  <h2>Change password</h2>
+  <form method="post" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="form_action" value="change_password">
+    <label>
+      Current password
+      <input type="password" name="current_password" autocomplete="current-password" required>
+    </label>
+    <label>
+      New password
+      <input type="password" name="new_password" autocomplete="new-password" minlength="8" required>
+    </label>
+    <label>
+      Confirm new password
+      <input type="password" name="confirm_password" autocomplete="new-password" minlength="8" required>
+    </label>
+    <button type="submit">Change password</button>
+  </form>
 </section>
 {% endblock %}

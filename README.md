@@ -35,6 +35,8 @@ Initialize the database and create the first user:
 flask --app app init-db
 ```
 
+The `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment variables bootstrap the owner/admin account. Customer accounts should be created from the admin-only Users page after logging in.
+
 Run locally on this PC only:
 
 ```powershell
@@ -90,7 +92,7 @@ Set environment variables in the hosting dashboard:
 - `SECRET_KEY`
 - `CARDTRADER_API_TOKEN`
 - `DATABASE_URL`
-- `ADMIN_USERNAME` and `ADMIN_PASSWORD` for the first `flask --app app init-db` run
+- `ADMIN_USERNAME` and `ADMIN_PASSWORD` to bootstrap the owner/admin account
 - `SESSION_COOKIE_SECURE=true` when HTTPS is active
 
 For production, prefer PostgreSQL through the hosting provider. SQLite is fine for local and LAN testing.

@@ -1,6 +1,7 @@
 import os
 import re
 import secrets
+from functools import wraps
 from urllib.parse import urlparse
 
 from flask import (
@@ -93,13 +94,32 @@ def initialize_database():
     ensure_database_schema()
     username = os.environ.get("ADMIN_USERNAME")
     password = os.environ.get("ADMIN_PASSWORD")
+    created_user = None
     if username and password and not User.query.filter_by(username=username).first():
         user = User(username=username)
         user.set_password(password)
+        user.is_admin = True
         db.session.add(user)
         db.session.commit()
-        return username
-    return None
+        created_user = username
+
+    ensure_admin_user(username)
+    return created_user
+
+
+def ensure_admin_user(username=None):
+    if username:
+        user = User.query.filter_by(username=username).first()
+        if user and not user.is_admin and User.query.filter_by(is_admin=True).count() == 0:
+            user.is_admin = True
+            db.session.commit()
+            return
+
+    if User.query.filter_by(is_admin=True).count() == 0:
+        first_user = User.query.order_by(User.id).first()
+        if first_user:
+            first_user.is_admin = True
+            db.session.commit()
 
 
 def ensure_database_schema():
@@ -109,6 +129,8 @@ def ensure_database_schema():
 
     existing_columns = {column["name"] for column in inspector.get_columns("user")}
     with db.engine.begin() as connection:
+        if "is_admin" not in existing_columns:
+            connection.execute(text("ALTER TABLE user ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"))
         if "cardtrader_api_token" not in existing_columns:
             connection.execute(text("ALTER TABLE user ADD COLUMN cardtrader_api_token TEXT"))
         if "active_watchlist_id" not in existing_columns:
@@ -205,6 +227,17 @@ def wants_safe_redirect(target):
     return not parsed.netloc and not parsed.scheme
 
 
+def admin_required(view):
+    @wraps(view)
+    @login_required
+    def wrapped(*args, **kwargs):
+        if not current_user.is_admin:
+            abort(403)
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
 def register_routes(app):
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -236,13 +269,94 @@ def register_routes(app):
     @login_required
     def config_page():
         if request.method == "POST":
-            token = request.form.get("cardtrader_api_token", "").strip()
-            current_user.cardtrader_api_token = token
-            db.session.commit()
-            flash("CardTrader API token saved for your user.", "success")
+            form_action = request.form.get("form_action", "api_token")
+            if form_action == "change_password":
+                current_password = request.form.get("current_password", "")
+                new_password = request.form.get("new_password", "")
+                confirm_password = request.form.get("confirm_password", "")
+
+                if not current_user.check_password(current_password):
+                    flash("Current password is incorrect.", "error")
+                    return redirect(url_for("config_page"))
+                if len(new_password) < 8:
+                    flash("New password must be at least 8 characters.", "error")
+                    return redirect(url_for("config_page"))
+                if new_password != confirm_password:
+                    flash("New password and confirmation do not match.", "error")
+                    return redirect(url_for("config_page"))
+
+                current_user.set_password(new_password)
+                db.session.commit()
+                flash("Password changed.", "success")
+            else:
+                token = request.form.get("cardtrader_api_token", "").strip()
+                current_user.cardtrader_api_token = token
+                db.session.commit()
+                flash("CardTrader API token saved for your user.", "success")
             return redirect(url_for("config_page"))
 
         return render_template("config.html")
+
+    @app.route("/admin/users", methods=["GET", "POST"])
+    @admin_required
+    def admin_users():
+        if request.method == "POST":
+            username = request.form.get("username", "").strip()
+            password = request.form.get("password", "")
+            if not username:
+                flash("Username is required.", "error")
+                return redirect(url_for("admin_users"))
+            if len(password) < 8:
+                flash("Temporary password must be at least 8 characters.", "error")
+                return redirect(url_for("admin_users"))
+            if User.query.filter_by(username=username).first():
+                flash("That username already exists.", "error")
+                return redirect(url_for("admin_users"))
+
+            user = User(username=username, is_admin=False)
+            user.set_password(password)
+            db.session.add(user)
+            db.session.commit()
+            flash(f"Created user {username}.", "success")
+            return redirect(url_for("admin_users"))
+
+        users = User.query.order_by(User.is_admin.desc(), User.username).all()
+        return render_template("admin_users.html", users=users)
+
+    @app.route("/admin/users/<int:user_id>/reset-password", methods=["POST"])
+    @admin_required
+    def admin_reset_user_password(user_id):
+        user = db.session.get(User, user_id)
+        if user is None:
+            abort(404)
+
+        password = request.form.get("password", "")
+        if len(password) < 8:
+            flash("Temporary password must be at least 8 characters.", "error")
+            return redirect(url_for("admin_users"))
+
+        user.set_password(password)
+        db.session.commit()
+        flash(f"Password reset for {user.username}.", "success")
+        return redirect(url_for("admin_users"))
+
+    @app.route("/admin/users/<int:user_id>/delete", methods=["POST"])
+    @admin_required
+    def admin_delete_user(user_id):
+        user = db.session.get(User, user_id)
+        if user is None:
+            abort(404)
+        if user.id == current_user.id:
+            flash("You cannot delete your own account while logged in.", "error")
+            return redirect(url_for("admin_users"))
+
+        username = user.username
+        for watchlist in Watchlist.query.filter_by(user_id=user.id).all():
+            db.session.delete(watchlist)
+        db.session.delete(user)
+        db.session.commit()
+        flash(f"Deleted user {username} and their watchlists.", "success")
+        return redirect(url_for("admin_users"))
 
     @app.route("/")
     @login_required
