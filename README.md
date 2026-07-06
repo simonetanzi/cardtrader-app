@@ -27,6 +27,8 @@ $env:SECRET_KEY="replace-with-a-long-random-secret"
 $env:CARDTRADER_API_TOKEN="replace-with-cardtrader-token"
 $env:ADMIN_USERNAME="admin"
 $env:ADMIN_PASSWORD="replace-with-a-real-password"
+$env:USER_USERNAME="friend"
+$env:USER_PASSWORD="replace-with-a-real-password"
 ```
 
 Initialize the database and create the first user:
@@ -35,7 +37,7 @@ Initialize the database and create the first user:
 flask --app app init-db
 ```
 
-The `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment variables bootstrap the owner/admin account. Customer accounts should be created from the admin-only Users page after logging in.
+The `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment variables bootstrap the owner/admin account. `USER_USERNAME` and `USER_PASSWORD` can bootstrap one normal customer account.
 
 Run locally on this PC only:
 
@@ -93,6 +95,7 @@ Set environment variables in the hosting dashboard:
 - `CARDTRADER_API_TOKEN`
 - `DATABASE_URL`
 - `ADMIN_USERNAME` and `ADMIN_PASSWORD` to bootstrap the owner/admin account
+- `USER_USERNAME` and `USER_PASSWORD` to bootstrap one normal customer account
 - `SESSION_COOKIE_SECURE=true` when HTTPS is active
 
 For production, prefer PostgreSQL through the hosting provider. SQLite is fine for local and LAN testing.

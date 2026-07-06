@@ -15,9 +15,6 @@
         <a href="{{ url_for('watchlist') }}">Watchlist</a>
         <a href="{{ url_for('price_check') }}">Price Check</a>
         <a href="{{ url_for('config_page') }}">Config</a>
-        {% if current_user.is_admin %}
-          <a href="{{ url_for('admin_users') }}">Users</a>
-        {% endif %}
       </nav>
       <form method="post" action="{{ url_for('logout') }}" class="logout-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

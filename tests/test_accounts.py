@@ -1,5 +1,12 @@
+from app import create_app
+from config import Config
 from extensions import db
 from models import User, Watchlist, WatchlistItem
+
+
+class BootstrapConfig(Config):
+    TESTING = True
+    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
 
 
 def set_csrf(client):
@@ -42,46 +49,21 @@ def make_watchlist_with_item(user):
     return watchlist, item
 
 
-def test_admin_can_create_normal_user(app_context):
-    owner = make_user("owner", is_admin=True)
-    client = app_context.test_client()
-    login(client, owner.username)
+def test_env_bootstrap_creates_admin_and_normal_user(monkeypatch):
+    monkeypatch.setenv("ADMIN_USERNAME", "owner")
+    monkeypatch.setenv("ADMIN_PASSWORD", "ownerpass123")
+    monkeypatch.setenv("USER_USERNAME", "friend")
+    monkeypatch.setenv("USER_PASSWORD", "friendpass123")
 
-    response = post(
-        client,
-        "/admin/users",
-        {"username": "friend", "password": "temporary123"},
-    )
+    app = create_app(BootstrapConfig)
 
-    assert response.status_code == 302
-    friend = User.query.filter_by(username="friend").one()
-    assert friend.check_password("temporary123")
-    assert friend.is_admin is False
-
-
-def test_non_admin_cannot_manage_users(app_context):
-    user = make_user("friend")
-    client = app_context.test_client()
-    login(client, user.username)
-
-    response = client.get("/admin/users")
-
-    assert response.status_code == 403
-
-
-def test_admin_delete_user_removes_watchlists_and_items(app_context):
-    owner = make_user("owner", is_admin=True)
-    friend = make_user("friend")
-    watchlist, item = make_watchlist_with_item(friend)
-    client = app_context.test_client()
-    login(client, owner.username)
-
-    response = post(client, f"/admin/users/{friend.id}/delete")
-
-    assert response.status_code == 302
-    assert db.session.get(User, friend.id) is None
-    assert db.session.get(Watchlist, watchlist.id) is None
-    assert db.session.get(WatchlistItem, item.id) is None
+    with app.app_context():
+        owner = User.query.filter_by(username="owner").one()
+        friend = User.query.filter_by(username="friend").one()
+        assert owner.is_admin is True
+        assert friend.is_admin is False
+        assert owner.check_password("ownerpass123")
+        assert friend.check_password("friendpass123")
 
 
 def test_user_can_change_own_password(app_context):

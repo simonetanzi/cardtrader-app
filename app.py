@@ -1,7 +1,6 @@
 import os
 import re
 import secrets
-from functools import wraps
 from urllib.parse import urlparse
 
 from flask import (
@@ -82,29 +81,43 @@ def register_csrf(app):
 def register_commands(app):
     @app.cli.command("init-db")
     def init_db_command():
-        created_user = initialize_database()
-        if created_user:
-            print(f"Created admin user: {created_user}")
+        created_users = initialize_database()
+        if created_users:
+            print(f"Created user(s): {', '.join(created_users)}")
         else:
-            print("Database initialized. Set ADMIN_USERNAME and ADMIN_PASSWORD to create a first user.")
+            print("Database initialized. Set ADMIN_USERNAME/ADMIN_PASSWORD or USER_USERNAME/USER_PASSWORD to create users.")
 
 
 def initialize_database():
     db.create_all()
     ensure_database_schema()
-    username = os.environ.get("ADMIN_USERNAME")
-    password = os.environ.get("ADMIN_PASSWORD")
-    created_user = None
-    if username and password and not User.query.filter_by(username=username).first():
-        user = User(username=username)
-        user.set_password(password)
-        user.is_admin = True
-        db.session.add(user)
-        db.session.commit()
-        created_user = username
+    created_users = []
+    admin_username = os.environ.get("ADMIN_USERNAME")
+    admin_password = os.environ.get("ADMIN_PASSWORD")
+    customer_username = os.environ.get("USER_USERNAME")
+    customer_password = os.environ.get("USER_PASSWORD")
 
-    ensure_admin_user(username)
-    return created_user
+    if create_user_from_env(admin_username, admin_password, is_admin=True):
+        created_users.append(admin_username)
+    if create_user_from_env(customer_username, customer_password, is_admin=False):
+        created_users.append(customer_username)
+
+    ensure_admin_user(admin_username)
+    return created_users
+
+
+def create_user_from_env(username, password, is_admin=False):
+    username = (username or "").strip()
+    if not username or not password:
+        return False
+    if User.query.filter_by(username=username).first():
+        return False
+
+    user = User(username=username, is_admin=is_admin)
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+    return True
 
 
 def ensure_admin_user(username=None):
@@ -234,17 +247,6 @@ def wants_safe_redirect(target):
     return not parsed.netloc and not parsed.scheme
 
 
-def admin_required(view):
-    @wraps(view)
-    @login_required
-    def wrapped(*args, **kwargs):
-        if not current_user.is_admin:
-            abort(403)
-        return view(*args, **kwargs)
-
-    return wrapped
-
-
 def register_routes(app):
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -303,67 +305,6 @@ def register_routes(app):
             return redirect(url_for("config_page"))
 
         return render_template("config.html")
-
-    @app.route("/admin/users", methods=["GET", "POST"])
-    @admin_required
-    def admin_users():
-        if request.method == "POST":
-            username = request.form.get("username", "").strip()
-            password = request.form.get("password", "")
-            if not username:
-                flash("Username is required.", "error")
-                return redirect(url_for("admin_users"))
-            if len(password) < 8:
-                flash("Temporary password must be at least 8 characters.", "error")
-                return redirect(url_for("admin_users"))
-            if User.query.filter_by(username=username).first():
-                flash("That username already exists.", "error")
-                return redirect(url_for("admin_users"))
-
-            user = User(username=username, is_admin=False)
-            user.set_password(password)
-            db.session.add(user)
-            db.session.commit()
-            flash(f"Created user {username}.", "success")
-            return redirect(url_for("admin_users"))
-
-        users = User.query.order_by(User.is_admin.desc(), User.username).all()
-        return render_template("admin_users.html", users=users)
-
-    @app.route("/admin/users/<int:user_id>/reset-password", methods=["POST"])
-    @admin_required
-    def admin_reset_user_password(user_id):
-        user = db.session.get(User, user_id)
-        if user is None:
-            abort(404)
-
-        password = request.form.get("password", "")
-        if len(password) < 8:
-            flash("Temporary password must be at least 8 characters.", "error")
-            return redirect(url_for("admin_users"))
-
-        user.set_password(password)
-        db.session.commit()
-        flash(f"Password reset for {user.username}.", "success")
-        return redirect(url_for("admin_users"))
-
-    @app.route("/admin/users/<int:user_id>/delete", methods=["POST"])
-    @admin_required
-    def admin_delete_user(user_id):
-        user = db.session.get(User, user_id)
-        if user is None:
-            abort(404)
-        if user.id == current_user.id:
-            flash("You cannot delete your own account while logged in.", "error")
-            return redirect(url_for("admin_users"))
-
-        username = user.username
-        for watchlist in Watchlist.query.filter_by(user_id=user.id).all():
-            db.session.delete(watchlist)
-        db.session.delete(user)
-        db.session.commit()
-        flash(f"Deleted user {username} and their watchlists.", "success")
-        return redirect(url_for("admin_users"))
 
     @app.route("/")
     @login_required

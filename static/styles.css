@@ -100,10 +100,6 @@ a {
   margin: 60px auto;
 }
 
-.narrowish {
-  max-width: 720px;
-}
-
 .muted {
   color: var(--muted);
 }
@@ -233,7 +229,6 @@ label {
 }
 
 .watchlist-list,
-.user-list,
 .report-list {
   display: grid;
   gap: 14px;
@@ -273,24 +268,6 @@ label {
   gap: 16px;
   grid-template-columns: minmax(260px, 1fr) minmax(340px, 1.4fr) auto;
   padding: 16px;
-}
-
-.user-row {
-  align-items: end;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(180px, 1fr) minmax(280px, 1.4fr) auto;
-  padding: 16px;
-}
-
-.user-action-form {
-  align-items: end;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(220px, 1fr) auto;
 }
 
 .watchlist-main,
@@ -452,8 +429,6 @@ td {
   .watchlist-selector-form,
   .new-watchlist-form,
   .rename-watchlist-form,
-  .user-row,
-  .user-action-form,
   .watchlist-row,
   .watchlist-main,
   .report-header,
