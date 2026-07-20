@@ -26,6 +26,9 @@ class Config:
         "CARDTRADER_BASE_URL",
         "https://api.cardtrader.com/api/v2",
     ).rstrip("/")
+    CARDTRADER_MAX_RATE_LIMIT_RETRIES = int(
+        os.environ.get("CARDTRADER_MAX_RATE_LIMIT_RETRIES", "2")
+    )
     BLUEPRINTS_DB_PATH = Path(
         os.environ.get("BLUEPRINTS_DB_PATH", BASE_DIR / "data" / "blueprints.sqlite")
     )
