@@ -10,6 +10,14 @@ from availability import (
 from cardtrader_client import CardTraderError, fetch_marketplace_products
 
 
+def is_offer_level_cart_add_error(error):
+    message = str(error)
+    return (
+        "CardTrader /cart/add failed with status 422" in message
+        and "validation_error" in message
+    )
+
+
 def money_from_cents(cents):
     if cents is None:
         return ""
@@ -64,7 +72,12 @@ def run_price_check(items):
 
             verified_offers = []
             for product in candidates:
-                verified_product, error = verify_product_available_through_cart(product, item_data)
+                try:
+                    verified_product, error = verify_product_available_through_cart(product, item_data)
+                except CardTraderError as exc:
+                    if is_offer_level_cart_add_error(exc):
+                        continue
+                    raise
                 if verified_product is not None:
                     verified_offers.append(verified_product)
 
