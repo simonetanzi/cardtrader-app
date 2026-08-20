@@ -8,7 +8,11 @@ from flask_login import current_user
 
 
 class CardTraderError(RuntimeError):
-    pass
+    def __init__(self, message, *, path=None, status_code=None, error_code=None):
+        super().__init__(message)
+        self.path = path
+        self.status_code = status_code
+        self.error_code = error_code
 
 
 class CardTraderRateLimiter:
@@ -114,9 +118,18 @@ def request_cardtrader(method, path, **kwargs):
     if response.status_code == 403:
         raise CardTraderError("CardTrader refused access for this API token.")
     if response.status_code not in (200, 201):
-        preview = response.text[:300]
+        error_code = None
+        try:
+            error_payload = response.json()
+            if isinstance(error_payload, dict):
+                error_code = error_payload.get("error_code")
+        except (TypeError, ValueError):
+            pass
         raise CardTraderError(
-            f"CardTrader {path} failed with status {response.status_code}: {preview}"
+            f"CardTrader could not complete the request (status {response.status_code}).",
+            path=path,
+            status_code=response.status_code,
+            error_code=error_code,
         )
 
     return response.json()

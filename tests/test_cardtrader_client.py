@@ -22,13 +22,14 @@ class FakeClock:
 
 
 class FakeResponse:
-    def __init__(self, status_code=200, headers=None):
+    def __init__(self, status_code=200, headers=None, json_data=None, text=""):
         self.status_code = status_code
         self.headers = headers or {}
-        self.text = ""
+        self.text = text
+        self.json_data = {} if json_data is None else json_data
 
     def json(self):
-        return {}
+        return self.json_data
 
 
 def test_blocks_purchase_endpoint(app_context):
@@ -86,3 +87,40 @@ def test_rate_limited_request_respects_retry_after(app_context, monkeypatch):
 
     assert request_cardtrader("GET", "/cart") == {}
     assert sleep_calls == [2.0]
+
+
+def test_upstream_error_body_is_not_exposed(app_context, monkeypatch):
+    monkeypatch.setattr(
+        cardtrader_client.requests,
+        "request",
+        lambda *args, **kwargs: FakeResponse(
+            500,
+            text="private upstream diagnostic that must not reach a visitor",
+        ),
+    )
+
+    with pytest.raises(CardTraderError) as raised:
+        request_cardtrader("GET", "/cart")
+
+    assert "private upstream diagnostic" not in str(raised.value)
+    assert str(raised.value) == "CardTrader could not complete the request (status 500)."
+
+
+def test_validation_error_keeps_only_structured_classification(app_context, monkeypatch):
+    monkeypatch.setattr(
+        cardtrader_client.requests,
+        "request",
+        lambda *args, **kwargs: FakeResponse(
+            422,
+            json_data={"error_code": "validation_error", "errors": {"private": "detail"}},
+            text='{"error_code":"validation_error","errors":{"private":"detail"}}',
+        ),
+    )
+
+    with pytest.raises(CardTraderError) as raised:
+        request_cardtrader("POST", "/cart/add")
+
+    assert raised.value.path == "/cart/add"
+    assert raised.value.status_code == 422
+    assert raised.value.error_code == "validation_error"
+    assert "private" not in str(raised.value)

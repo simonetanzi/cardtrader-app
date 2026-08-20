@@ -11,10 +11,10 @@ from cardtrader_client import CardTraderError, fetch_marketplace_products
 
 
 def is_offer_level_cart_add_error(error):
-    message = str(error)
     return (
-        "CardTrader /cart/add failed with status 422" in message
-        and "validation_error" in message
+        error.path == "/cart/add"
+        and error.status_code == 422
+        and error.error_code == "validation_error"
     )
 
 

@@ -54,8 +54,10 @@ def test_stale_cart_add_error_rejects_only_that_offer(monkeypatch):
     def fake_verify(product, _item_data):
         if product["id"] == 101:
             raise CardTraderError(
-                'CardTrader /cart/add failed with status 422: '
-                '{"error_code":"validation_error","errors":{"product_id":["is not a reference to an existing product"]}}'
+                "CardTrader could not complete the request (status 422).",
+                path="/cart/add",
+                status_code=422,
+                error_code="validation_error",
             )
         return dict(product, cart_verified=True, verified_quantity=product["quantity"]), None
 

@@ -1,85 +1,137 @@
-# CardTrader App
+# CardTrader Watchlist
 
-Hosted CardTrader watchlist and availability-checking tool with private user accounts and an optional restricted public demo.
+### A production-minded Flask application for finding Magic: The Gathering cards and verifying whether matching CardTrader Zero offers are actually available.
 
-The app keeps the CardTrader API token on the server. Browser clients never receive the token. The CardTrader client is intentionally limited to:
+This project turns a repetitive marketplace workflow into a focused web product. Users build watchlists, define acceptable price, language, and condition criteria, and run live availability checks against CardTrader. A passwordless guest mode makes the complete workflow accessible to portfolio reviewers without exposing credentials or requiring account creation.
 
-- `GET /marketplace/products`
-- `GET /cart`
-- `POST /cart/add`
-- `POST /cart/remove`
+> **Portfolio demo:** open the deployed application from this repository's **About** section and select **Continue as guest**. The guest account uses a shared watchlist, so reviewers can immediately search, edit criteria, and run a live price check.
 
-There is no purchase endpoint in this app.
+## What you can try
 
-## Local setup
+1. Continue as a guest—no registration or API key required.
+2. Search a catalog of more than 118,000 Magic card blueprints.
+3. Add cards to the shared demonstration watchlist.
+4. Set a maximum price, accepted languages, and minimum condition.
+5. Run a live check to find qualifying CardTrader Zero inventory.
+
+Guest users get the real product workflow, not a mocked interface. They share one communal watchlist and cannot access credentials, account configuration, or watchlist ownership controls.
+
+## Why I built it
+
+Marketplace listings are not always equivalent to immediately purchasable inventory. A useful result must satisfy several constraints at once and still be available when checked.
+
+The application therefore does more than compare prices. It:
+
+- Filters offers by price, language, condition, seller eligibility, and card properties.
+- Rejects foil, signed, altered, graded, and misprint variants when they do not match the intended purchase.
+- Verifies availability through the CardTrader cart, then removes the temporary cart quantity.
+- Handles stale offers without abandoning the rest of a price-check run.
+- Sorts the final report around actionable offers and quantities.
+
+## Engineering highlights
+
+| Area | Implementation |
+| --- | --- |
+| Backend | Flask application factory, SQLAlchemy models, Flask-Login sessions, server-rendered Jinja templates |
+| Data | Indexed SQLite catalog for fast card search; PostgreSQL-ready application persistence |
+| External API | Narrow CardTrader client with an explicit endpoint allowlist, timeouts, structured errors, and rolling-window rate limits |
+| Security | Server-only API token, CSRF protection, secure cookie settings, password hashing, ownership checks, and safe redirects |
+| Public demo | Passwordless guest role with shared state and server-enforced restrictions on credentials and watchlist administration |
+| Reliability | Cart cleanup in `finally`, bounded retry handling for HTTP 429 responses, stale-offer isolation, and automated tests |
+| Deployment | Gunicorn process configuration and environment-driven settings for Render-compatible hosting |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    B[Browser] -->|Search and watchlist actions| F[Flask application]
+    F --> A[(Application database)]
+    F --> C[(Indexed card catalog)]
+    F -->|Server-side token| CT[CardTrader API]
+    CT -->|Marketplace and cart data| F
+    F -->|Filtered, verified report| B
+```
+
+The CardTrader token remains in the hosting environment. It is never embedded in the repository or delivered to the browser. The API client permits marketplace and cart operations only; there is no purchase endpoint in the application.
+
+## Guest and private accounts
+
+| Capability | Guest | Private user |
+| --- | :---: | :---: |
+| Search the card catalog | Yes | Yes |
+| Add, remove, and configure cards | Yes, shared | Yes, private |
+| Run live price checks | Yes | Yes |
+| Create and manage multiple watchlists | No | Yes |
+| Configure a personal API token | No | Yes |
+| Change account credentials | No | Yes |
+
+The guest API token belongs to a dedicated, payment-free demonstration account. Guest restrictions are checked by Flask routes as well as reflected in the interface.
+
+## Testing
+
+The automated suite covers account isolation, guest permissions, token selection, endpoint restrictions, marketplace filtering, cart-based availability checks, stale offers, error sanitization, retries, and rate limiting.
+
+```text
+23 passed
+```
+
+Run it with:
 
 ```powershell
-cd C:\Users\serpe\Documents\dev\python\Cardtrader_app
+pytest
+```
+
+## Technology
+
+- Python
+- Flask and Jinja
+- Flask-Login
+- SQLAlchemy
+- SQLite and PostgreSQL
+- Requests
+- Gunicorn
+- Pytest
+- Render-compatible deployment
+
+<details>
+<summary><strong>Run locally</strong></summary>
+
+### 1. Create the environment
+
+```powershell
+git clone https://github.com/simonetanzi/cardtrader-app.git
+cd cardtrader-app
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-Set environment variables in PowerShell:
+### 2. Configure environment variables
 
 ```powershell
 $env:SECRET_KEY="replace-with-a-long-random-secret"
-$env:CARDTRADER_API_TOKEN="replace-with-cardtrader-token"
+$env:CARDTRADER_API_TOKEN="replace-with-a-dedicated-cardtrader-token"
 $env:ADMIN_USERNAME="admin"
-$env:ADMIN_PASSWORD="replace-with-a-real-password"
-$env:USER_USERNAME="friend"
-$env:USER_PASSWORD="replace-with-a-real-password"
+$env:ADMIN_PASSWORD="replace-with-a-strong-password"
 $env:ENABLE_GUEST_ACCOUNT="true"
 $env:GUEST_USERNAME="guest"
 ```
 
-Initialize the database and create the first user:
+Optional variables include `DATABASE_URL`, `USER_USERNAME`, `USER_PASSWORD`, and `SESSION_COOKIE_SECURE`.
+
+### 3. Initialize and run
 
 ```powershell
 flask --app app init-db
-```
-
-The `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment variables bootstrap the owner/admin account. `USER_USERNAME` and `USER_PASSWORD` can bootstrap one normal customer account.
-
-When `ENABLE_GUEST_ACCOUNT=true`, the app also creates a passwordless shared guest account and shows a **Continue as guest** button on the login page. Guest visitors share one communal watchlist: they can search, add or remove cards, adjust card criteria, and run live price checks with the server-side `CARDTRADER_API_TOKEN`. They cannot create separate watchlists, rename or delete the shared list, change credentials, view the token, or save their own token. Changes made by one guest are visible to every other guest. Use a dedicated, payment-free CardTrader account for the public demo because availability checks temporarily add and remove cart items.
-
-Run locally on this PC only:
-
-```powershell
 flask --app app run --host 127.0.0.1 --port 5000
 ```
 
-Open:
+Open `http://127.0.0.1:5000`.
 
-```text
-http://127.0.0.1:5000
-```
+</details>
 
-## LAN test
-
-Run the app so another device on your LAN can reach it:
-
-```powershell
-flask --app app run --host 0.0.0.0 --port 5000
-```
-
-Find the host PC local IP:
-
-```powershell
-ipconfig
-```
-
-Open this from another PC on the same network:
-
-```text
-http://HOST_PC_LOCAL_IP:5000
-```
-
-Windows Firewall may ask you to allow Python on private networks.
-
-## Hosting notes
-
-For Render or Railway, use:
+<details>
+<summary><strong>Deployment configuration</strong></summary>
 
 Build command:
 
@@ -93,32 +145,20 @@ Start command:
 gunicorn app:app
 ```
 
-Set environment variables in the hosting dashboard:
+Production environment variables:
 
 - `SECRET_KEY`
 - `CARDTRADER_API_TOKEN`
 - `DATABASE_URL`
-- `ADMIN_USERNAME` and `ADMIN_PASSWORD` to bootstrap the owner/admin account
-- `USER_USERNAME` and `USER_PASSWORD` to bootstrap one normal customer account
-- `ENABLE_GUEST_ACCOUNT=true` and optionally `GUEST_USERNAME` to expose the restricted public demo
-- `SESSION_COOKIE_SECURE=true` when HTTPS is active
+- `ADMIN_USERNAME` and `ADMIN_PASSWORD`
+- `ENABLE_GUEST_ACCOUNT=true`
+- `GUEST_USERNAME=guest`
+- `SESSION_COOKIE_SECURE=true`
 
-For production, prefer PostgreSQL through the hosting provider. SQLite is fine for local and LAN testing.
+Use managed PostgreSQL for persistent hosted data. The local SQLite application database is intended for development only.
 
-The bundled blueprint catalog is stored as `data/blueprints.sqlite`. For this MVP it contains only Magic: the Gathering cards, which keeps searches fast and memory usage low on small hosting plans.
+</details>
 
-## Before making the GitHub repository public
+## Current scope
 
-1. Confirm `.env`, `app.db`, logs, and virtual environments are ignored and are not present anywhere in Git history.
-2. Rotate the CardTrader token, Flask secret key, database password, and account passwords if any were ever committed or pasted into repository files.
-3. Keep production secrets only in the hosting provider's environment-variable settings.
-4. Enable GitHub secret scanning and dependency alerts after changing repository visibility.
-5. Review the bundled catalog/database for data you are permitted to redistribute.
-
-Changing the GitHub repository visibility is intentionally a separate manual step after this review; making the code public does not automatically deploy the guest demo.
-
-## Tests
-
-```powershell
-pytest
-```
+The bundled catalog is limited to Magic: The Gathering. The project deliberately focuses on reliable search, watchlist management, and verified availability rather than purchasing or checkout automation.
