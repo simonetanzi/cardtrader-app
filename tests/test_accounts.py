@@ -7,6 +7,7 @@ from models import User, Watchlist, WatchlistItem
 class BootstrapConfig(Config):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+    ENABLE_GUEST_ACCOUNT = False
 
 
 def set_csrf(client):
@@ -64,6 +65,111 @@ def test_env_bootstrap_creates_admin_and_normal_user(monkeypatch):
         assert friend.is_admin is False
         assert owner.check_password("ownerpass123")
         assert friend.check_password("friendpass123")
+
+
+def test_guest_account_is_created_and_supports_passwordless_demo_login():
+    class GuestConfig(BootstrapConfig):
+        ENABLE_GUEST_ACCOUNT = True
+        GUEST_USERNAME = "demo"
+
+    app = create_app(GuestConfig)
+    client = app.test_client()
+    set_csrf(client)
+
+    response = post(client, "/guest-login")
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/")
+    with app.app_context():
+        guest = User.query.filter_by(username="demo").one()
+        assert guest.is_guest is True
+        assert guest.is_admin is False
+
+
+def test_guest_cannot_use_normal_login_or_change_account_settings():
+    class GuestConfig(BootstrapConfig):
+        ENABLE_GUEST_ACCOUNT = True
+        GUEST_USERNAME = "guest"
+
+    app = create_app(GuestConfig)
+    client = app.test_client()
+    set_csrf(client)
+
+    normal_login = post(client, "/login", {"username": "guest", "password": "anything"})
+    assert normal_login.status_code == 200
+
+    post(client, "/guest-login")
+    config_response = client.get("/config")
+    price_check_response = client.get("/price-check")
+
+    assert config_response.status_code == 302
+    assert config_response.headers["Location"].endswith("/")
+    assert price_check_response.status_code == 200
+
+
+def test_guest_uses_server_side_cardtrader_token():
+    class GuestConfig(BootstrapConfig):
+        ENABLE_GUEST_ACCOUNT = True
+        GUEST_USERNAME = "guest"
+        CARDTRADER_API_TOKEN = "server-demo-token"
+
+    app = create_app(GuestConfig)
+    client = app.test_client()
+    set_csrf(client)
+    post(client, "/guest-login")
+
+    with app.test_request_context("/"):
+        from flask_login import login_user
+        from cardtrader_client import get_headers
+
+        guest = User.query.filter_by(username="guest").one()
+        login_user(guest)
+        headers = get_headers()
+
+    assert headers["Authorization"] == "Bearer server-demo-token"
+
+
+def test_guest_can_run_live_price_checks_but_cannot_manage_watchlists(monkeypatch):
+    class GuestConfig(BootstrapConfig):
+        ENABLE_GUEST_ACCOUNT = True
+        GUEST_USERNAME = "guest"
+        CARDTRADER_API_TOKEN = "server-demo-token"
+
+    app = create_app(GuestConfig)
+    client = app.test_client()
+    set_csrf(client)
+    post(client, "/guest-login")
+
+    with app.app_context():
+        guest = User.query.filter_by(username="guest").one()
+        make_watchlist_with_item(guest)
+
+    monkeypatch.setattr(
+        "app.run_price_check",
+        lambda items: {
+            "generated_at": "2026-08-20 12:00:00",
+            "api_error": None,
+            "total_offers": 0,
+            "total_cards": 0,
+            "results": [],
+        },
+    )
+
+    price_page = client.get("/price-check")
+    live_check = post(client, "/price-check")
+
+    assert price_page.status_code == 200
+    assert b"Run live price check" in price_page.data
+    assert b"disabled" not in price_page.data
+    assert live_check.status_code == 200
+
+    for path in (
+        "/watchlist/switch",
+        "/watchlist/create",
+        "/watchlist/rename",
+        "/watchlist/delete-active",
+    ):
+        assert post(client, path).status_code == 403
 
 
 def test_user_can_change_own_password(app_context):

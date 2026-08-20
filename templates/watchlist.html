@@ -8,6 +8,7 @@
 
 {% include "_watchlist_selector.html" %}
 
+{% if not current_user.is_guest %}
 <section class="panel watchlist-manage-box">
   <form method="post" action="{{ url_for('rename_watchlist') }}" class="rename-watchlist-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -22,6 +23,7 @@
     <button type="submit" class="danger" {% if watchlists|length <= 1 %}disabled{% endif %}>Delete active watchlist</button>
   </form>
 </section>
+{% endif %}
 
 {% if watchlist.items %}
   <form id="bulk-update-form" method="post" action="{{ url_for('update_all_watchlist_items') }}" class="bulk-action-bar">

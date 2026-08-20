@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from flask import (
     Flask,
     abort,
+    current_app,
     flash,
     redirect,
     render_template,
@@ -62,7 +63,10 @@ def register_template_helpers(app):
             "product_language": product_language,
             "api_configured": (
                 current_user.is_authenticated
-                and current_user.has_cardtrader_api_token
+                and (
+                    current_user.has_cardtrader_api_token
+                    or bool(app.config["CARDTRADER_API_TOKEN"])
+                )
             ),
         }
 
@@ -101,9 +105,30 @@ def initialize_database():
         created_users.append(admin_username)
     if create_user_from_env(customer_username, customer_password, is_admin=False):
         created_users.append(customer_username)
+    if current_app.config.get("ENABLE_GUEST_ACCOUNT", False):
+        guest_username = current_app.config["GUEST_USERNAME"]
+        if create_guest_user(guest_username):
+            created_users.append(guest_username)
 
     ensure_admin_user(admin_username)
     return created_users
+
+
+def create_guest_user(username):
+    username = (username or "guest").strip()
+    user = User.query.filter_by(username=username).first()
+    if user:
+        if not user.is_guest:
+            return False
+        return False
+
+    user = User(username=username, is_guest=True)
+    # Guest access is passwordless. Keep an unguessable hash so the normal login
+    # form can never be used to authenticate this shared account.
+    user.set_password(secrets.token_urlsafe(48))
+    db.session.add(user)
+    db.session.commit()
+    return True
 
 
 def create_user_from_env(username, password, is_admin=False):
@@ -123,13 +148,18 @@ def create_user_from_env(username, password, is_admin=False):
 def ensure_admin_user(username=None):
     if username:
         user = User.query.filter_by(username=username).first()
-        if user and not user.is_admin and User.query.filter_by(is_admin=True).count() == 0:
+        if (
+            user
+            and not user.is_guest
+            and not user.is_admin
+            and User.query.filter_by(is_admin=True).count() == 0
+        ):
             user.is_admin = True
             db.session.commit()
             return
 
     if User.query.filter_by(is_admin=True).count() == 0:
-        first_user = User.query.order_by(User.id).first()
+        first_user = User.query.filter_by(is_guest=False).order_by(User.id).first()
         if first_user:
             first_user.is_admin = True
             db.session.commit()
@@ -149,6 +179,13 @@ def ensure_database_schema():
                 text(
                     f"ALTER TABLE {user_table} "
                     f"ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT {boolean_default}"
+                )
+            )
+        if "is_guest" not in existing_columns:
+            connection.execute(
+                text(
+                    f"ALTER TABLE {user_table} "
+                    f"ADD COLUMN is_guest BOOLEAN NOT NULL DEFAULT {boolean_default}"
                 )
             )
         if "cardtrader_api_token" not in existing_columns:
@@ -247,6 +284,11 @@ def wants_safe_redirect(target):
     return not parsed.netloc and not parsed.scheme
 
 
+def reject_guest_watchlist_management():
+    if current_user.is_guest:
+        abort(403, "The guest demo uses one shared watchlist.")
+
+
 def register_routes(app):
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -257,7 +299,7 @@ def register_routes(app):
             username = request.form.get("username", "").strip()
             password = request.form.get("password", "")
             user = User.query.filter_by(username=username).first()
-            if user and user.check_password(password):
+            if user and not user.is_guest and user.check_password(password):
                 login_user(user)
                 target = request.args.get("next")
                 if wants_safe_redirect(target):
@@ -265,7 +307,23 @@ def register_routes(app):
                 return redirect(url_for("index"))
             flash("Login failed. Check the username and password.", "error")
 
-        return render_template("login.html")
+        return render_template(
+            "login.html",
+            guest_enabled=app.config["ENABLE_GUEST_ACCOUNT"],
+        )
+
+    @app.route("/guest-login", methods=["POST"])
+    def guest_login():
+        if not app.config["ENABLE_GUEST_ACCOUNT"]:
+            abort(404)
+        user = User.query.filter_by(
+            username=app.config["GUEST_USERNAME"],
+            is_guest=True,
+        ).first()
+        if user is None:
+            abort(503, "Guest account is not available.")
+        login_user(user)
+        return redirect(url_for("index"))
 
     @app.route("/logout", methods=["POST"])
     @login_required
@@ -277,6 +335,9 @@ def register_routes(app):
     @app.route("/config", methods=["GET", "POST"])
     @login_required
     def config_page():
+        if current_user.is_guest:
+            flash("The shared guest account cannot change credentials or API settings.", "info")
+            return redirect(url_for("index"))
         if request.method == "POST":
             form_action = request.form.get("form_action", "api_token")
             if form_action == "change_password":
@@ -339,6 +400,7 @@ def register_routes(app):
     @app.route("/watchlist/switch", methods=["POST"])
     @login_required
     def switch_watchlist():
+        reject_guest_watchlist_management()
         watchlist_id_raw = request.form.get("watchlist_id", "").strip()
         try:
             watchlist_id = int(watchlist_id_raw)
@@ -356,6 +418,7 @@ def register_routes(app):
     @app.route("/watchlist/create", methods=["POST"])
     @login_required
     def create_watchlist():
+        reject_guest_watchlist_management()
         name = request.form.get("name", "").strip() or make_next_watchlist_name()
         watchlist = Watchlist(name=name[:120], user_id=current_user.id)
         db.session.add(watchlist)
@@ -368,6 +431,7 @@ def register_routes(app):
     @app.route("/watchlist/rename", methods=["POST"])
     @login_required
     def rename_watchlist():
+        reject_guest_watchlist_management()
         watchlist = get_or_create_active_watchlist()
         name = request.form.get("name", "").strip()
         if not name:
@@ -382,6 +446,7 @@ def register_routes(app):
     @app.route("/watchlist/delete-active", methods=["POST"])
     @login_required
     def delete_active_watchlist():
+        reject_guest_watchlist_management()
         watchlist = get_or_create_active_watchlist()
         if len(user_watchlists()) <= 1:
             flash("You must keep at least one watchlist.", "error")

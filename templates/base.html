@@ -14,7 +14,9 @@
         <a href="{{ url_for('index') }}">Search</a>
         <a href="{{ url_for('watchlist') }}">Watchlist</a>
         <a href="{{ url_for('price_check') }}">Price Check</a>
-        <a href="{{ url_for('config_page') }}">Config</a>
+        {% if not current_user.is_guest %}
+          <a href="{{ url_for('config_page') }}">Config</a>
+        {% endif %}
       </nav>
       <form method="post" action="{{ url_for('logout') }}" class="logout-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -34,7 +36,11 @@
       {% endif %}
     {% endwith %}
 
-    {% if current_user.is_authenticated and not api_configured %}
+    {% if current_user.is_authenticated and current_user.is_guest %}
+      <div class="message info">
+        You are using the shared public demo. Changes may be visible to other visitors.
+      </div>
+    {% elif current_user.is_authenticated and not api_configured %}
       <div class="message warning">
         CardTrader API token is not configured for your user. Open Config before running live price checks.
       </div>

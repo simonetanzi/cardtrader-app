@@ -22,6 +22,8 @@ class Config:
     SQLALCHEMY_DATABASE_URI = database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     CARDTRADER_API_TOKEN = os.environ.get("CARDTRADER_API_TOKEN", "").strip()
+    ENABLE_GUEST_ACCOUNT = os.environ.get("ENABLE_GUEST_ACCOUNT", "false").lower() == "true"
+    GUEST_USERNAME = os.environ.get("GUEST_USERNAME", "guest").strip() or "guest"
     CARDTRADER_BASE_URL = os.environ.get(
         "CARDTRADER_BASE_URL",
         "https://api.cardtrader.com/api/v2",
